@@ -1,0 +1,41 @@
+diff --git chrome/browser/printing/printer_query.cc chrome/browser/printing/printer_query.cc
+index 0e48a7582d86c..6ddeaa7c4e736 100644
+--- chrome/browser/printing/printer_query.cc
++++ chrome/browser/printing/printer_query.cc
+@@ -124,6 +124,7 @@ PrinterQuery::PrinterQuery(content::GlobalRenderFrameHostId rfh_id)
+       rfh_id_(rfh_id),
+       cookie_(PrintSettings::NewCookie()) {
+   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++  printing_context_->set_render_ids(rfh_id.child_id, rfh_id.frame_routing_id);
+ }
+ 
+ PrinterQuery::~PrinterQuery() {
+diff --git printing/printing_context.h printing/printing_context.h
+index 63f170c950504..962e60d23da59 100644
+--- printing/printing_context.h
++++ printing/printing_context.h
+@@ -215,6 +215,13 @@ class COMPONENT_EXPORT(PRINTING) PrintingContext {
+   void SetJobId(int job_id);
+ #endif
+ 
++  void set_render_ids(int render_process_id, int render_frame_id) {
++    render_process_id_ = render_process_id;
++    render_frame_id_ = render_frame_id;
++  }
++  int render_process_id() const { return render_process_id_; }
++  int render_frame_id() const { return render_frame_id_; }
++
+  protected:
+   PrintingContext(Delegate* delegate, ProcessBehavior process_behavior);
+ 
+@@ -248,6 +255,10 @@ class COMPONENT_EXPORT(PRINTING) PrintingContext {
+   // management.
+   int job_id_ = kNoPrintJobId;
+ 
++  // Routing IDs for the frame that owns this object.
++  int render_process_id_ = 0;
++  int render_frame_id_ = 0;
++
+  private:
+   const ProcessBehavior process_behavior_;
+ };

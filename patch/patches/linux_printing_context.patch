@@ -1,0 +1,136 @@
+diff --git printing/printing_context_linux.cc printing/printing_context_linux.cc
+index 03302777935ba..4e53392605c37 100644
+--- printing/printing_context_linux.cc
++++ printing/printing_context_linux.cc
+@@ -69,11 +69,11 @@ mojom::ResultCode PrintingContextLinux::UseDefaultSettings() {
+   ResetSettings();
+ 
+ #if BUILDFLAG(IS_LINUX)
+-  if (!ui::LinuxUi::instance())
++  if (!ui::PrintingContextLinuxDelegate::instance())
+     return mojom::ResultCode::kSuccess;
+ 
+   if (!print_dialog_)
+-    print_dialog_ = ui::LinuxUi::instance()->CreatePrintDialog(this);
++    print_dialog_ = ui::PrintingContextLinuxDelegate::instance()->CreatePrintDialog(this);
+ 
+   if (print_dialog_) {
+     print_dialog_->UseDefaultSettings();
+@@ -85,8 +85,8 @@ mojom::ResultCode PrintingContextLinux::UseDefaultSettings() {
+ 
+ gfx::Size PrintingContextLinux::GetPdfPaperSizeDeviceUnits() {
+ #if BUILDFLAG(IS_LINUX)
+-  if (ui::LinuxUi::instance())
+-    return ui::LinuxUi::instance()->GetPdfPaperSize(this);
++  if (ui::PrintingContextLinuxDelegate::instance())
++    return ui::PrintingContextLinuxDelegate::instance()->GetPdfPaperSize(this);
+ #endif
+ 
+   return gfx::Size();
+@@ -98,11 +98,11 @@ mojom::ResultCode PrintingContextLinux::UpdatePrinterSettings(
+   DCHECK(!in_print_job_);
+ 
+ #if BUILDFLAG(IS_LINUX)
+-  if (!ui::LinuxUi::instance())
++  if (!ui::PrintingContextLinuxDelegate::instance())
+     return mojom::ResultCode::kSuccess;
+ 
+   if (!print_dialog_)
+-    print_dialog_ = ui::LinuxUi::instance()->CreatePrintDialog(this);
++    print_dialog_ = ui::PrintingContextLinuxDelegate::instance()->CreatePrintDialog(this);
+ 
+   if (print_dialog_) {
+     // PrintDialogGtk::UpdateSettings() calls InitWithSettings() so settings_ will
+diff --git ui/linux/linux_ui.cc ui/linux/linux_ui.cc
+index 3408b6200d17a..5d91e65a2b40f 100644
+--- ui/linux/linux_ui.cc
++++ ui/linux/linux_ui.cc
+@@ -18,11 +18,29 @@ namespace ui {
+ namespace {
+ 
+ LinuxUi* g_linux_ui = nullptr;
++static PrintingContextLinuxDelegate* g_delegate = nullptr;
+ 
+ }  // namespace
+ 
++// static
++PrintingContextLinuxDelegate* PrintingContextLinuxDelegate::SetInstance(
++    PrintingContextLinuxDelegate* delegate) {
++  auto old_delegate = g_delegate;
++  g_delegate = delegate;
++  return old_delegate;
++}
++
++// static
++PrintingContextLinuxDelegate* PrintingContextLinuxDelegate::instance() {
++  return g_delegate;
++}
++
+ // static
+ LinuxUi* LinuxUi::SetInstance(LinuxUi* instance) {
++#if BUILDFLAG(IS_LINUX) && BUILDFLAG(ENABLE_PRINTING)
++  PrintingContextLinuxDelegate::SetInstance(instance);
++#endif
++
+   return std::exchange(g_linux_ui, instance);
+ }
+ 
+diff --git ui/linux/linux_ui.h ui/linux/linux_ui.h
+index b940382678ba7..c2fa9b7303e87 100644
+--- ui/linux/linux_ui.h
++++ ui/linux/linux_ui.h
+@@ -20,6 +20,10 @@
+ #include "printing/buildflags/buildflags.h"
+ #include "ui/display/types/display_config.h"
+ 
++#if BUILDFLAG(ENABLE_PRINTING)
++#include "printing/printing_context_linux.h"  // nogncheck
++#endif
++
+ // The main entrypoint into Linux toolkit specific code. GTK/QT code should only
+ // be executed behind this interface.
+ 
+@@ -62,9 +66,27 @@ class TextEditCommandAuraLinux;
+ class WindowButtonOrderObserver;
+ class WindowFrameProvider;
+ 
++class COMPONENT_EXPORT(LINUX_UI) PrintingContextLinuxDelegate {
++ public:
++  virtual ~PrintingContextLinuxDelegate() = default;
++
++  virtual printing::PrintDialogLinuxInterface* CreatePrintDialog(
++      printing::PrintingContextLinux* context) = 0;
++
++  virtual gfx::Size GetPdfPaperSize(printing::PrintingContextLinux* context) = 0;
++
++  static PrintingContextLinuxDelegate* SetInstance(
++      PrintingContextLinuxDelegate* delegate);
++  static PrintingContextLinuxDelegate* instance();
++};
++
+ // Adapter class with targets to render like different toolkits. Set by any
+ // project that wants to do linux desktop native rendering.
+-class COMPONENT_EXPORT(LINUX_UI) LinuxUi {
++class COMPONENT_EXPORT(LINUX_UI) LinuxUi
++#if BUILDFLAG(ENABLE_PRINTING)
++    : public PrintingContextLinuxDelegate
++#endif
++ {
+  public:
+   // Describes the window management actions that could be taken in response to
+   // a middle click in the non client area.
+@@ -150,14 +172,6 @@ class COMPONENT_EXPORT(LINUX_UI) LinuxUi {
+   // Returns a map of KeyboardEvent code to KeyboardEvent key values.
+   virtual base::flat_map<std::string, std::string> GetKeyboardLayoutMap() = 0;
+ 
+-#if BUILDFLAG(ENABLE_PRINTING)
+-  virtual printing::PrintDialogLinuxInterface* CreatePrintDialog(
+-      printing::PrintingContextLinux* context) = 0;
+-
+-  virtual gfx::Size GetPdfPaperSize(
+-      printing::PrintingContextLinux* context) = 0;
+-#endif
+-
+   // Returns a native file selection dialog.  `listener` is of type
+   // SelectFileDialog::Listener.  TODO(thomasanderson): Move
+   // SelectFileDialog::Listener to SelectFileDialogListener so that it can be

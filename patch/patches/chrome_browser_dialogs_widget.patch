@@ -1,0 +1,317 @@
+diff --git chrome/browser/ui/views/chrome_javascript_app_modal_view_factory_views.cc chrome/browser/ui/views/chrome_javascript_app_modal_view_factory_views.cc
+index b169371e4d42f..509e4bda85b47 100644
+--- chrome/browser/ui/views/chrome_javascript_app_modal_view_factory_views.cc
++++ chrome/browser/ui/views/chrome_javascript_app_modal_view_factory_views.cc
+@@ -100,7 +100,7 @@ javascript_dialogs::AppModalDialogView* CreateViewsJavaScriptDialog(
+   gfx::NativeWindow parent_window =
+       controller->web_contents()->GetTopLevelNativeWindow();
+ #if defined(USE_AURA)
+-  if (!parent_window->GetRootWindow()) {
++  if (parent_window && !parent_window->GetRootWindow()) {
+     // When we are part of a WebContents that isn't actually being displayed
+     // on the screen, we can't actually attach to it.
+     parent_window = nullptr;
+diff --git components/constrained_window/constrained_window_views.cc components/constrained_window/constrained_window_views.cc
+index a2ca2f52148fd..7689d43ec9e0b 100644
+--- components/constrained_window/constrained_window_views.cc
++++ components/constrained_window/constrained_window_views.cc
+@@ -101,9 +101,18 @@ class WidgetModalDialogHostObserverViews : public views::WidgetObserver,
+ gfx::Rect GetModalDialogBounds(views::Widget* widget,
+                                web_modal::ModalDialogHost* dialog_host,
+                                const gfx::Size& size) {
+-  views::Widget* const host_widget =
+-      views::Widget::GetWidgetForNativeView(dialog_host->GetHostView());
+-  CHECK(host_widget);
++  // |host_view| will be nullptr with CEF windowless rendering.
++  auto host_view = dialog_host->GetHostView();
++  views::Widget* host_widget =
++      host_view ? views::Widget::GetWidgetForNativeView(host_view) : nullptr;
++
++  // If the host view is not backed by a Views::Widget, just update the widget
++  // size. This can happen on MacViews under the Cocoa browser where the window
++  // modal dialogs are displayed as sheets, and their position is managed by a
++  // ConstrainedWindowSheetController instance.
++  if (!host_widget) {
++    return gfx::Rect(dialog_host->GetDialogPosition(size), size);
++  }
+ 
+   gfx::Point position = dialog_host->GetDialogPosition(size);
+   // Align the first row of pixels inside the border. This is the apparent top
+@@ -111,43 +120,22 @@ gfx::Rect GetModalDialogBounds(views::Widget* widget,
+   position.set_y(position.y() -
+                  widget->non_client_view()->frame_view()->GetInsets().top());
+ 
+-  gfx::Rect dialog_bounds(position, size);
+-
+   if (widget->is_top_level() && SupportsGlobalScreenCoordinates()) {
+-    gfx::Rect dialog_screen_bounds =
+-        dialog_bounds +
+-        host_widget->GetClientAreaBoundsInScreen().OffsetFromOrigin();
+-    const gfx::Rect host_screen_bounds = host_widget->GetWindowBoundsInScreen();
+-
+-    // TODO(crbug.com/40851111): The requested dialog bounds should never fall
+-    // outside the bounds of the transient parent.
+-    DCHECK(dialog_screen_bounds.Intersects(host_screen_bounds));
+-
+-    // Adjust the dialog bound to ensure it remains visible on the display.
+-    const gfx::Rect display_work_area =
+-        display::Screen::GetScreen()
+-            ->GetDisplayNearestView(dialog_host->GetHostView())
+-            .work_area();
+-    if (!display_work_area.Contains(dialog_screen_bounds)) {
+-      dialog_screen_bounds.AdjustToFit(display_work_area);
+-    }
+-
+-    // For platforms that clip transient children to the viewport we must
+-    // maximize its bounds on the display whilst keeping it within the host
+-    // bounds to avoid viewport clipping.
+-    // In the case that the host window bounds do not have sufficient overlap
+-    // with the display, and the dialog cannot be shown in its entirety, this is
+-    // a recoverable state as users are still able to reposition the host window
+-    // back onto the display.
+-    if (PlatformClipsChildrenToViewport() &&
+-        !host_screen_bounds.Contains(dialog_screen_bounds)) {
+-      dialog_screen_bounds.AdjustToFit(host_screen_bounds);
+-    }
+-
+-    // Readjust the position of the dialog.
+-    dialog_bounds.set_origin(dialog_screen_bounds.origin());
++    position += host_widget->GetClientAreaBoundsInScreen().OffsetFromOrigin();
++    // If the dialog extends partially off any display, clamp its position to
++    // be fully visible within that display. If the dialog doesn't intersect
++    // with any display clamp its position to be fully on the nearest display.
++    gfx::Rect display_rect = gfx::Rect(position, size);
++    const display::Display display =
++        display::Screen::GetScreen()->GetDisplayNearestView(
++            dialog_host->GetHostView());
++    const gfx::Rect work_area = display.work_area();
++    if (!work_area.Contains(display_rect))
++      display_rect.AdjustToFit(work_area);
++    position = display_rect.origin();
+   }
+-  return dialog_bounds;
++
++  return gfx::Rect(position, size);
+ }
+ 
+ void UpdateModalDialogPosition(views::Widget* widget,
+@@ -158,15 +146,24 @@ void UpdateModalDialogPosition(views::Widget* widget,
+     return;
+   }
+ 
+-  views::Widget* const host_widget =
+-      views::Widget::GetWidgetForNativeView(dialog_host->GetHostView());
++  // |host_view| will be nullptr with CEF windowless rendering.
++  auto host_view = dialog_host->GetHostView();
++  views::Widget* host_widget =
++      host_view ? views::Widget::GetWidgetForNativeView(host_view) : nullptr;
+ 
+   // If the host view is not backed by a Views::Widget, just update the widget
+   // size. This can happen on MacViews under the Cocoa browser where the window
+   // modal dialogs are displayed as sheets, and their position is managed by a
+   // ConstrainedWindowSheetController instance.
+   if (!host_widget) {
++#if BUILDFLAG(IS_MAC)
+     widget->SetSize(size);
++#elif BUILDFLAG(IS_POSIX)
++    // Set the bounds here instead of relying on the default behavior of
++    // DesktopWindowTreeHostPlatform::CenterWindow which incorrectly centers
++    // the window on the screen.
++    widget->SetBounds(gfx::Rect(dialog_host->GetDialogPosition(size), size));
++#endif
+     return;
+   }
+ 
+@@ -282,8 +279,13 @@ views::Widget* CreateBrowserModalDialogViews(views::DialogDelegate* dialog,
+ 
+   gfx::NativeView parent_view =
+       parent ? CurrentClient()->GetDialogHostView(parent) : nullptr;
++  // Use with CEF windowless rendering.
++  gfx::AcceleratedWidget parent_widget = parent ?
++      CurrentClient()->GetModalDialogHost(parent)->GetAcceleratedWidget() :
++      gfx::kNullAcceleratedWidget;
+   views::Widget* widget =
+-      views::DialogDelegate::CreateDialogWidget(dialog, nullptr, parent_view);
++      views::DialogDelegate::CreateDialogWidget(dialog, nullptr, parent_view,
++                                                parent_widget);
+   widget->SetNativeWindowProperty(
+       views::kWidgetIdentifierKey,
+       const_cast<void*>(kConstrainedWindowWidgetIdentifier));
+@@ -299,8 +301,7 @@ views::Widget* CreateBrowserModalDialogViews(views::DialogDelegate* dialog,
+   if (!requires_positioning)
+     return widget;
+ 
+-  ModalDialogHost* host =
+-      parent ? CurrentClient()->GetModalDialogHost(parent) : nullptr;
++  ModalDialogHost* host = CurrentClient()->GetModalDialogHost(parent);
+   if (host) {
+     DCHECK_EQ(parent_view, host->GetHostView());
+     ModalDialogHostObserver* dialog_host_observer =
+@@ -313,10 +314,17 @@ views::Widget* CreateBrowserModalDialogViews(views::DialogDelegate* dialog,
+ 
+ views::Widget* ShowBrowserModal(std::unique_ptr<ui::DialogModel> dialog_model,
+                                 gfx::NativeWindow parent) {
++  gfx::NativeView parent_view =
++      parent ? CurrentClient()->GetDialogHostView(parent) : nullptr;
++  // Use with CEF windowless rendering.
++  gfx::AcceleratedWidget parent_widget = parent ?
++      CurrentClient()->GetModalDialogHost(parent)->GetAcceleratedWidget() :
++      gfx::kNullAcceleratedWidget;
++
+   // TODO(crbug.com/41493925): Remove will_use_custom_frame once native frame
+   // dialogs support autosize.
+   bool will_use_custom_frame = views::DialogDelegate::CanSupportCustomFrame(
+-      parent ? CurrentClient()->GetDialogHostView(parent) : nullptr);
++      parent_view, parent_widget);
+   auto dialog = views::BubbleDialogModelHost::CreateModal(
+       std::move(dialog_model), ui::MODAL_TYPE_WINDOW, will_use_custom_frame);
+   dialog->SetOwnedByWidget(true);
+diff --git components/constrained_window/native_web_contents_modal_dialog_manager_views.cc components/constrained_window/native_web_contents_modal_dialog_manager_views.cc
+index 2b495a8ab092c..01a28aca853d0 100644
+--- components/constrained_window/native_web_contents_modal_dialog_manager_views.cc
++++ components/constrained_window/native_web_contents_modal_dialog_manager_views.cc
+@@ -190,9 +190,20 @@ void NativeWebContentsModalDialogManagerViews::HostChanged(
+   if (host_) {
+     host_->AddObserver(this);
+ 
+-    for (views::Widget* widget : observed_widgets_) {
+-      views::Widget::ReparentNativeView(widget->GetNativeView(),
+-                                        host_->GetHostView());
++    // |host_view| will be nullptr with CEF windowless rendering.
++    if (auto host_view = host_->GetHostView()) {
++      for (views::Widget* widget : observed_widgets_) {
++#if defined(USE_AURA)
++        auto widget_view = widget->GetNativeView();
++        // Don't reparent between different root windows. Doing so causes
++        // issues with layout of dialogs containing Chrome browsers.
++        if (host_view->GetRootWindow() == widget_view->GetRootWindow()) {
++          views::Widget::ReparentNativeView(widget_view, host_view);
++        }
++#else
++        views::Widget::ReparentNativeView(widget->GetNativeView(), host_view);
++#endif
++      }
+     }
+ 
+     OnPositionRequiresUpdate();
+diff --git components/web_modal/modal_dialog_host.h components/web_modal/modal_dialog_host.h
+index 51ed6bcf6b540..c6e1161140655 100644
+--- components/web_modal/modal_dialog_host.h
++++ components/web_modal/modal_dialog_host.h
+@@ -34,6 +34,10 @@ class WEB_MODAL_EXPORT ModalDialogHost {
+ 
+   // Returns the view against which the dialog is positioned and parented.
+   virtual gfx::NativeView GetHostView() const = 0;
++  // Returns the widget against which the dialog is positioned and parented.
++  // Used with CEF windowless rendering.
++  virtual gfx::AcceleratedWidget GetAcceleratedWidget() const {
++      return gfx::kNullAcceleratedWidget; }
+   // Gets the position for the dialog in coordinates relative to the host view.
+   virtual gfx::Point GetDialogPosition(const gfx::Size& size) = 0;
+   // Returns whether a dialog currently about to be shown should be activated.
+diff --git ui/views/window/dialog_delegate.cc ui/views/window/dialog_delegate.cc
+index 941699c28e286..3f6569b116e64 100644
+--- ui/views/window/dialog_delegate.cc
++++ ui/views/window/dialog_delegate.cc
+@@ -85,10 +85,12 @@ DialogDelegate::DialogDelegate() {
+ // static
+ Widget* DialogDelegate::CreateDialogWidget(WidgetDelegate* delegate,
+                                            gfx::NativeWindow context,
+-                                           gfx::NativeView parent) {
++                                           gfx::NativeView parent,
++                                           gfx::AcceleratedWidget parent_widget) {
+   views::Widget* widget = new DialogWidget;
+   views::Widget::InitParams params =
+-      GetDialogWidgetInitParams(delegate, context, parent, gfx::Rect());
++      GetDialogWidgetInitParams(delegate, context, parent, gfx::Rect(),
++                                parent_widget);
+   widget->Init(std::move(params));
+   return widget;
+ }
+@@ -97,17 +99,19 @@ Widget* DialogDelegate::CreateDialogWidget(WidgetDelegate* delegate,
+ Widget* DialogDelegate::CreateDialogWidget(
+     std::unique_ptr<WidgetDelegate> delegate,
+     gfx::NativeWindow context,
+-    gfx::NativeView parent) {
++    gfx::NativeView parent,
++    gfx::AcceleratedWidget parent_widget) {
+   DCHECK(delegate->owned_by_widget());
+-  return CreateDialogWidget(delegate.release(), context, parent);
++  return CreateDialogWidget(delegate.release(), context, parent, parent_widget);
+ }
+ 
+ // static
+-bool DialogDelegate::CanSupportCustomFrame(gfx::NativeView parent) {
++bool DialogDelegate::CanSupportCustomFrame(gfx::NativeView parent,
++                                           gfx::AcceleratedWidget parent_widget) {
+ #if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && \
+     BUILDFLAG(ENABLE_DESKTOP_AURA)
+   // The new style doesn't support unparented dialogs on Linux desktop.
+-  return parent != nullptr;
++  return parent != nullptr || parent_widget != gfx::kNullAcceleratedWidget;
+ #else
+   return true;
+ #endif
+@@ -118,14 +122,15 @@ Widget::InitParams DialogDelegate::GetDialogWidgetInitParams(
+     WidgetDelegate* delegate,
+     gfx::NativeWindow context,
+     gfx::NativeView parent,
+-    const gfx::Rect& bounds) {
++    const gfx::Rect& bounds,
++    gfx::AcceleratedWidget parent_widget) {
+   views::Widget::InitParams params;
+   params.delegate = delegate;
+   params.bounds = bounds;
+   DialogDelegate* dialog = delegate->AsDialogDelegate();
+ 
+   if (dialog)
+-    dialog->params_.custom_frame &= CanSupportCustomFrame(parent);
++    dialog->params_.custom_frame &= CanSupportCustomFrame(parent, parent_widget);
+ 
+   if (!dialog || dialog->use_custom_frame()) {
+     params.opacity = Widget::InitParams::WindowOpacity::kTranslucent;
+@@ -138,6 +143,7 @@ Widget::InitParams DialogDelegate::GetDialogWidgetInitParams(
+   }
+   params.context = context;
+   params.parent = parent;
++  params.parent_widget = parent_widget;
+ #if !BUILDFLAG(IS_APPLE)
+   // Web-modal (ui::MODAL_TYPE_CHILD) dialogs with parents are marked as child
+   // widgets to prevent top-level window behavior (independent movement, etc).
+diff --git ui/views/window/dialog_delegate.h ui/views/window/dialog_delegate.h
+index 3cb2a5e22972d..1a716178e3f51 100644
+--- ui/views/window/dialog_delegate.h
++++ ui/views/window/dialog_delegate.h
+@@ -97,13 +97,18 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
+   // your use case.
+   static Widget* CreateDialogWidget(std::unique_ptr<WidgetDelegate> delegate,
+                                     gfx::NativeWindow context,
+-                                    gfx::NativeView parent);
++                                    gfx::NativeView parent,
++                                    gfx::AcceleratedWidget parent_widget =
++                                        gfx::kNullAcceleratedWidget);
+   static Widget* CreateDialogWidget(WidgetDelegate* delegate,
+                                     gfx::NativeWindow context,
+-                                    gfx::NativeView parent);
++                                    gfx::NativeView parent,
++                                    gfx::AcceleratedWidget parent_widget =
++                                        gfx::kNullAcceleratedWidget);
+ 
+   // Whether using custom dialog frame is supported for this dialog.
+-  static bool CanSupportCustomFrame(gfx::NativeView parent);
++  static bool CanSupportCustomFrame(gfx::NativeView parent,
++                                    gfx::AcceleratedWidget parent_widget);
+ 
+   // Returns the dialog widget InitParams for a given |context| or |parent|.
+   // If |bounds| is not empty, used to initially place the dialog, otherwise
+@@ -111,7 +116,9 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
+   static Widget::InitParams GetDialogWidgetInitParams(WidgetDelegate* delegate,
+                                                       gfx::NativeWindow context,
+                                                       gfx::NativeView parent,
+-                                                      const gfx::Rect& bounds);
++                                                      const gfx::Rect& bounds,
++                                                      gfx::AcceleratedWidget parent_widget =
++                                                          gfx::kNullAcceleratedWidget);
+ 
+   // Returns a mask specifying which of the available DialogButtons are visible
+   // for the dialog.

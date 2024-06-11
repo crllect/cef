@@ -1,0 +1,21 @@
+diff --git third_party/blink/renderer/build/scripts/templates/runtime_enabled_features.h.tmpl third_party/blink/renderer/build/scripts/templates/runtime_enabled_features.h.tmpl
+index 1f8a978367a46..6f073aa18151e 100644
+--- third_party/blink/renderer/build/scripts/templates/runtime_enabled_features.h.tmpl
++++ third_party/blink/renderer/build/scripts/templates/runtime_enabled_features.h.tmpl
+@@ -14,6 +14,8 @@
+ #include "third_party/blink/renderer/platform/platform_export.h"
+ #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+ 
++class AlloyContentRendererClient;
++
+ #define ASSERT_ORIGIN_TRIAL(feature) \
+   static_assert(std::is_same<decltype(::blink::RuntimeEnabledFeatures::     \
+                                           feature##EnabledByRuntimeFlag()), \
+@@ -134,6 +136,7 @@ class PLATFORM_EXPORT RuntimeEnabledFeatures : public RuntimeEnabledFeaturesBase
+   // protected section of RuntimeEnabledFeaturesBase. Normally, unit tests
+   // should use the ScopedFeatureNameForTest classes defined in
+   // platform/testing/runtime_enabled_features_test_helpers.h.
++  friend class ::AlloyContentRendererClient;
+   friend class DevToolsEmulator;
+   friend class InternalRuntimeFlags;
+   friend class V8ContextSnapshotImpl;

@@ -1,0 +1,72 @@
+diff --git chrome/browser/browser_process.h chrome/browser/browser_process.h
+index 21ab47267370b..eb9b383727995 100644
+--- chrome/browser/browser_process.h
++++ chrome/browser/browser_process.h
+@@ -211,9 +211,9 @@ class BrowserProcess {
+   virtual DownloadStatusUpdater* download_status_updater() = 0;
+   virtual DownloadRequestLimiter* download_request_limiter() = 0;
+ 
++#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+   // Returns the object that manages background applications.
+   virtual BackgroundModeManager* background_mode_manager() = 0;
+-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+   virtual void set_background_mode_manager_for_test(
+       std::unique_ptr<BackgroundModeManager> manager) = 0;
+ #endif
+diff --git chrome/browser/browser_process_impl.cc chrome/browser/browser_process_impl.cc
+index f77210dcc2ff5..1d0eaa8ff245d 100644
+--- chrome/browser/browser_process_impl.cc
++++ chrome/browser/browser_process_impl.cc
+@@ -1113,18 +1113,14 @@ DownloadRequestLimiter* BrowserProcessImpl::download_request_limiter() {
+   return download_request_limiter_.get();
+ }
+ 
+-BackgroundModeManager* BrowserProcessImpl::background_mode_manager() {
+ #if BUILDFLAG(ENABLE_BACKGROUND_MODE)
++BackgroundModeManager* BrowserProcessImpl::background_mode_manager() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   if (!background_mode_manager_)
+     CreateBackgroundModeManager();
+   return background_mode_manager_.get();
+-#else
+-  return nullptr;
+-#endif
+ }
+ 
+-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+ void BrowserProcessImpl::set_background_mode_manager_for_test(
+     std::unique_ptr<BackgroundModeManager> manager) {
+   background_mode_manager_ = std::move(manager);
+diff --git chrome/browser/browser_process_impl.h chrome/browser/browser_process_impl.h
+index 8091cc691f093..9f16156c1f2cb 100644
+--- chrome/browser/browser_process_impl.h
++++ chrome/browser/browser_process_impl.h
+@@ -194,8 +194,8 @@ class BrowserProcessImpl : public BrowserProcess,
+   void SetApplicationLocale(const std::string& actual_locale) override;
+   DownloadStatusUpdater* download_status_updater() override;
+   DownloadRequestLimiter* download_request_limiter() override;
+-  BackgroundModeManager* background_mode_manager() override;
+ #if BUILDFLAG(ENABLE_BACKGROUND_MODE)
++  BackgroundModeManager* background_mode_manager() override;
+   void set_background_mode_manager_for_test(
+       std::unique_ptr<BackgroundModeManager> manager) override;
+ #endif
+diff --git chrome/browser/lifetime/browser_close_manager.cc chrome/browser/lifetime/browser_close_manager.cc
+index bfffa272e6458..460a35e0c708f 100644
+--- chrome/browser/lifetime/browser_close_manager.cc
++++ chrome/browser/lifetime/browser_close_manager.cc
+@@ -158,12 +158,14 @@ void BrowserCloseManager::CloseBrowsers() {
+   // exit can restore all browsers open before exiting.
+   ProfileManager::ShutdownSessionServices();
+ #endif
++#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+   if (!browser_shutdown::IsTryingToQuit()) {
+     BackgroundModeManager* background_mode_manager =
+         g_browser_process->background_mode_manager();
+     if (background_mode_manager)
+       background_mode_manager->SuspendBackgroundMode();
+   }
++#endif
+ 
+   // Make a copy of the BrowserList to simplify the case where we need to
+   // destroy a Browser during the loop.

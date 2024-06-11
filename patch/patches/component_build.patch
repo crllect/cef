@@ -1,0 +1,124 @@
+diff --git content/browser/devtools/devtools_instrumentation.h content/browser/devtools/devtools_instrumentation.h
+index c16e81b7d357f..2e74fc89de36f 100644
+--- content/browser/devtools/devtools_instrumentation.h
++++ content/browser/devtools/devtools_instrumentation.h
+@@ -115,7 +115,7 @@ bool ApplyUserAgentMetadataOverrides(
+     FrameTreeNode* frame_tree_node,
+     std::optional<blink::UserAgentMetadata>* override_out);
+ 
+-class WillCreateURLLoaderFactoryParams final {
++class CONTENT_EXPORT WillCreateURLLoaderFactoryParams final {
+   STACK_ALLOCATED();
+ 
+  public:
+diff --git content/browser/renderer_host/input/mouse_wheel_phase_handler.h content/browser/renderer_host/input/mouse_wheel_phase_handler.h
+index d69f9d4641613..e88aaf8617c52 100644
+--- content/browser/renderer_host/input/mouse_wheel_phase_handler.h
++++ content/browser/renderer_host/input/mouse_wheel_phase_handler.h
+@@ -9,6 +9,7 @@
+ #include "base/time/time.h"
+ #include "base/timer/timer.h"
+ #include "content/browser/renderer_host/render_widget_host_delegate.h"
++#include "content/common/content_export.h"
+ #include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+ #include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
+ 
+@@ -51,7 +52,7 @@ enum class FirstScrollUpdateAckState {
+ // The MouseWheelPhaseHandler is responsible for adding the proper phase to
+ // wheel events. Phase information is necessary for wheel scrolling since it
+ // shows the start and end of a scrolling sequence.
+-class MouseWheelPhaseHandler {
++class CONTENT_EXPORT MouseWheelPhaseHandler {
+  public:
+   MouseWheelPhaseHandler(RenderWidgetHostViewBase* const host_view);
+ 
+diff --git content/browser/renderer_host/input/synthetic_gesture_target_base.h content/browser/renderer_host/input/synthetic_gesture_target_base.h
+index 09d80f2ba678d..5dbff44c280a1 100644
+--- content/browser/renderer_host/input/synthetic_gesture_target_base.h
++++ content/browser/renderer_host/input/synthetic_gesture_target_base.h
+@@ -8,6 +8,7 @@
+ #include "base/functional/callback_forward.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/time/time.h"
++#include "content/common/content_export.h"
+ #include "content/common/input/synthetic_gesture_target.h"
+ #include "ui/gfx/geometry/point_f.h"
+ 
+@@ -26,7 +27,8 @@ namespace content {
+ 
+ class RenderWidgetHostImpl;
+ 
+-class SyntheticGestureTargetBase : public SyntheticGestureTarget {
++class CONTENT_EXPORT SyntheticGestureTargetBase :
++    public SyntheticGestureTarget {
+  public:
+   explicit SyntheticGestureTargetBase(RenderWidgetHostImpl* host);
+ 
+diff --git content/common/content_switches_internal.h content/common/content_switches_internal.h
+index 6af484f35f576..2462700b6d1fb 100644
+--- content/common/content_switches_internal.h
++++ content/common/content_switches_internal.h
+@@ -15,7 +15,7 @@ class CommandLine;
+ 
+ namespace content {
+ 
+-bool IsPinchToZoomEnabled();
++CONTENT_EXPORT bool IsPinchToZoomEnabled();
+ 
+ blink::mojom::V8CacheOptions GetV8CacheOptions();
+ 
+diff --git third_party/blink/renderer/controller/BUILD.gn third_party/blink/renderer/controller/BUILD.gn
+index 47e37a2aaa79c..7a65e0654453a 100644
+--- third_party/blink/renderer/controller/BUILD.gn
++++ third_party/blink/renderer/controller/BUILD.gn
+@@ -38,6 +38,7 @@ component("controller") {
+   }
+ 
+   configs += [
++    "//cef/libcef/features:config",
+     "//third_party/blink/renderer:config",
+     "//third_party/blink/renderer:inside_blink",
+     "//third_party/blink/renderer:non_test_config",
+@@ -67,6 +68,8 @@ component("controller") {
+     "performance_manager/v8_detailed_memory_reporter_impl.h",
+     "performance_manager/v8_worker_memory_reporter.cc",
+     "performance_manager/v8_worker_memory_reporter.h",
++    "//cef/libcef/renderer/blink_glue.cc",
++    "//cef/libcef/renderer/blink_glue.h",
+   ]
+ 
+   if (is_linux || is_chromeos) {
+diff --git ui/events/keycodes/BUILD.gn ui/events/keycodes/BUILD.gn
+index 9cdd599f0d739..23d1ff5cc30fc 100644
+--- ui/events/keycodes/BUILD.gn
++++ ui/events/keycodes/BUILD.gn
+@@ -19,6 +19,8 @@ source_set("xkb") {
+     "//ui/gfx/x/keysyms",
+   ]
+ 
++  defines = [ "KEYCODES_X_IMPLEMENTATION" ]
++
+   deps = [
+     "//base",
+     "//build:chromeos_buildflags",
+diff --git ui/events/keycodes/keyboard_code_conversion_xkb.h ui/events/keycodes/keyboard_code_conversion_xkb.h
+index 5693e3a1c4bc4..88c0cc6d59098 100644
+--- ui/events/keycodes/keyboard_code_conversion_xkb.h
++++ ui/events/keycodes/keyboard_code_conversion_xkb.h
+@@ -9,6 +9,7 @@
+ 
+ 
+ #include "ui/events/keycodes/dom/dom_key.h"
++#include "ui/events/keycodes/keycodes_x_export.h"
+ #include "ui/events/keycodes/xkb_keysym.h"
+ 
+ namespace ui {
+@@ -24,7 +25,7 @@ DomKey NonPrintableXKeySymToDomKey(xkb_keysym_t keysym);
+ // char16_t DeadXKeySymToCombiningCharacter(xkb_keysym_t keysym);
+ 
+ // Return the DomKey determined by the XKB layout result (keysym, character).
+-DomKey XKeySymToDomKey(xkb_keysym_t keysym, char16_t character);
++KEYCODES_X_EXPORT DomKey XKeySymToDomKey(xkb_keysym_t keysym, char16_t character);
+ 
+ }  // namespace ui
+ 

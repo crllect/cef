@@ -1,0 +1,50 @@
+diff --git content/browser/web_contents/web_contents_view.h content/browser/web_contents/web_contents_view.h
+index 0cc1db9645f04..ab2ae8c744278 100644
+--- content/browser/web_contents/web_contents_view.h
++++ content/browser/web_contents/web_contents_view.h
+@@ -26,7 +26,7 @@ struct DropData;
+ // The `WebContentsView` is an interface that is implemented by the platform-
+ // dependent web contents views. The `WebContents` uses this interface to talk
+ // to them.
+-class WebContentsView {
++class CONTENT_EXPORT WebContentsView {
+  public:
+   virtual ~WebContentsView() = default;
+ 
+diff --git extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.cc extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.cc
+index 8a77da73784c8..9ca31537809a3 100644
+--- extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.cc
++++ extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.cc
+@@ -204,6 +204,8 @@ void MimeHandlerViewGuest::CreateWebContents(
+   WebContents::CreateParams params(browser_context(),
+                                    guest_site_instance.get());
+   params.guest_delegate = this;
++  if (delegate_)
++    delegate_->OverrideWebContentsCreateParams(&params);
+   std::move(callback).Run(std::move(owned_this),
+                           WebContents::CreateWithSessionStorage(
+                               params, owner_web_contents()
+diff --git extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest_delegate.h extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest_delegate.h
+index 2fb8a60c1f56d..edd275135e60d 100644
+--- extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest_delegate.h
++++ extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest_delegate.h
+@@ -7,6 +7,8 @@
+ 
+ #include <string>
+ 
++#include "content/public/browser/web_contents.h"
++
+ namespace content {
+ class BrowserContext;
+ class RenderFrameHost;
+@@ -26,6 +28,10 @@ class MimeHandlerViewGuestDelegate {
+ 
+   virtual ~MimeHandlerViewGuestDelegate() {}
+ 
++  // Provides an opportunity to supply a custom view implementation.
++  virtual void OverrideWebContentsCreateParams(
++      content::WebContents::CreateParams* params) {}
++
+   // Handles context menu, or returns false if unhandled.
+   //
+   // The `render_frame_host` represents the frame that requests the context menu

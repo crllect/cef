@@ -1,0 +1,306 @@
+diff --git chrome/browser/enterprise/connectors/analysis/content_analysis_delegate.cc chrome/browser/enterprise/connectors/analysis/content_analysis_delegate.cc
+index 65bc8909d771f..a18907dd1e7ec 100644
+--- chrome/browser/enterprise/connectors/analysis/content_analysis_delegate.cc
++++ chrome/browser/enterprise/connectors/analysis/content_analysis_delegate.cc
+@@ -23,6 +23,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/time/time.h"
+ #include "build/build_config.h"
++#include "cef/libcef/features/runtime.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/enterprise/connectors/analysis/analysis_settings.h"
+ #include "chrome/browser/enterprise/connectors/analysis/content_analysis_dialog.h"
+@@ -357,6 +358,11 @@ bool ContentAnalysisDelegate::IsEnabled(Profile* profile,
+                                         GURL url,
+                                         Data* data,
+                                         AnalysisConnector connector) {
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++  if (cef::IsAlloyRuntimeEnabled())
++    return false;
++#endif
++
+   auto* service = ConnectorsServiceFactory::GetForBrowserContext(profile);
+   // If the corresponding Connector policy isn't set, don't perform scans.
+   if (!service || !service->IsConnectorEnabled(connector))
+diff --git chrome/browser/first_party_sets/first_party_sets_policy_service.cc chrome/browser/first_party_sets/first_party_sets_policy_service.cc
+index a3c34a9922d2e..38c982442bc80 100644
+--- chrome/browser/first_party_sets/first_party_sets_policy_service.cc
++++ chrome/browser/first_party_sets/first_party_sets_policy_service.cc
+@@ -282,6 +282,12 @@ void FirstPartySetsPolicyService::OnProfileConfigReady(
+ 
+   // Representation of the current profile to be persisted on disk.
+   const std::string browser_context_id = profile->GetBaseName().AsUTF8Unsafe();
++  if (browser_context_id.empty()) {
++    // CEF/Alloy incognito profiles have empty cache path.
++    OnReadyToNotifyDelegates(std::move(config),
++                             net::FirstPartySetsCacheFilter());
++    return;
++  }
+ 
+   base::RepeatingCallback<content::BrowserContext*()> browser_context_getter =
+       base::BindRepeating(
+diff --git chrome/browser/net/profile_network_context_service.cc chrome/browser/net/profile_network_context_service.cc
+index 627fc56f4f7cf..86d5f8027fd26 100644
+--- chrome/browser/net/profile_network_context_service.cc
++++ chrome/browser/net/profile_network_context_service.cc
+@@ -25,6 +25,7 @@
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
+ #include "build/chromeos_buildflags.h"
++#include "cef/libcef/features/runtime.h"
+ #include "chrome/browser/browser_features.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/content_settings/cookie_settings_factory.h"
+@@ -239,9 +240,16 @@ void UpdateCookieSettings(Profile* profile, ContentSettingsType type) {
+     // occurs in this class is unsynchronized, so it would be racy to rely on
+     // this update finishing before calling the context's callback.) This
+     // unfortunately triggers a double-update here.
+-    if (FederatedIdentityPermissionContext* fedcm_context =
+-            FederatedIdentityPermissionContextFactory::GetForProfile(profile);
+-        fedcm_context) {
++    FederatedIdentityPermissionContext* fedcm_context = nullptr;
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++    if (!cef::IsAlloyRuntimeEnabled()) {
++ #endif
++      fedcm_context =
++          FederatedIdentityPermissionContextFactory::GetForProfile(profile);
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++    }
++#endif
++    if (fedcm_context) {
+       settings = fedcm_context->GetSharingPermissionGrantsAsContentSettings();
+     }
+   } else {
+@@ -801,9 +809,16 @@ ProfileNetworkContextService::CreateCookieManagerParams(
+       continue;
+     }
+     if (type == ContentSettingsType::FEDERATED_IDENTITY_SHARING) {
+-      if (FederatedIdentityPermissionContext* fedcm_context =
+-              FederatedIdentityPermissionContextFactory::GetForProfile(profile);
+-          fedcm_context) {
++      FederatedIdentityPermissionContext* fedcm_context = nullptr;
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++      if (!cef::IsAlloyRuntimeEnabled()) {
++#endif
++        fedcm_context =
++            FederatedIdentityPermissionContextFactory::GetForProfile(profile);
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++      }
++#endif
++      if (fedcm_context) {
+         out->content_settings[type] =
+             fedcm_context->GetSharingPermissionGrantsAsContentSettings();
+       } else {
+@@ -1039,9 +1054,32 @@ void ProfileNetworkContextService::ConfigureNetworkContextParamsInternal(
+   network_context_params->cookie_manager_params =
+       CreateCookieManagerParams(profile_, *cookie_settings_);
+ 
++  if (!in_memory) {
++    network_context_params->file_paths =
++        ::network::mojom::NetworkContextFilePaths::New();
++  }
++
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
+   // Configure on-disk storage for non-OTR profiles. OTR profiles just use
+   // default behavior (in memory storage, default sizes).
+-  if (!in_memory) {
++  if (!in_memory && cef::IsAlloyRuntimeEnabled()) {
++    PrefService* prefs = profile_->GetPrefs();
++    // Configure the HTTP cache path and size.
++    const base::FilePath& base_cache_path =
++        prefs->GetFilePath(prefs::kDiskCacheDir);
++    DCHECK(!base_cache_path.empty());
++    network_context_params->file_paths->http_cache_directory =
++        base_cache_path.Append(chrome::kCacheDirname);
++    network_context_params->http_cache_max_size =
++        prefs->GetInteger(prefs::kDiskCacheSize);
++  }
++#endif  // BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++
++  if (!in_memory
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++      && !cef::IsAlloyRuntimeEnabled()
++#endif
++      ) {
+     PrefService* local_state = g_browser_process->local_state();
+     // Configure the HTTP cache path and size.
+     base::FilePath base_cache_path;
+@@ -1050,15 +1088,14 @@ void ProfileNetworkContextService::ConfigureNetworkContextParamsInternal(
+         local_state->GetFilePath(prefs::kDiskCacheDir);
+     if (!disk_cache_dir.empty())
+       base_cache_path = disk_cache_dir.Append(base_cache_path.BaseName());
++    network_context_params->file_paths->http_cache_directory =
++        base_cache_path.Append(chrome::kCacheDirname);
+     const int disk_cache_size = local_state->GetInteger(prefs::kDiskCacheSize);
+     network_context_params->http_cache_max_size = disk_cache_size;
+     network_context_params->shared_dictionary_cache_max_size = disk_cache_size;
++  }
+ 
+-    network_context_params->file_paths =
+-        ::network::mojom::NetworkContextFilePaths::New();
+-
+-    network_context_params->file_paths->http_cache_directory =
+-        base_cache_path.Append(chrome::kCacheDirname);
++  if (!in_memory) {
+     network_context_params->file_paths->data_directory =
+         path.Append(chrome::kNetworkDataDirname);
+     network_context_params->file_paths->unsandboxed_data_path = path;
+@@ -1229,6 +1266,9 @@ void ProfileNetworkContextService::ConfigureNetworkContextParamsInternal(
+   network_context_params->first_party_sets_access_delegate_params =
+       network::mojom::FirstPartySetsAccessDelegateParams::New();
+   network_context_params->first_party_sets_access_delegate_params->enabled =
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++      cef::IsAlloyRuntimeEnabled() ? false :
++#endif
+       PrivacySandboxSettingsFactory::GetForProfile(profile_)
+           ->AreRelatedWebsiteSetsEnabled();
+ 
+diff --git chrome/browser/signin/identity_manager_factory.cc chrome/browser/signin/identity_manager_factory.cc
+index 58750a47240e5..2894f323c26bb 100644
+--- chrome/browser/signin/identity_manager_factory.cc
++++ chrome/browser/signin/identity_manager_factory.cc
+@@ -11,6 +11,7 @@
+ #include "base/observer_list.h"
+ #include "build/build_config.h"
+ #include "build/chromeos_buildflags.h"
++#include "cef/libcef/features/runtime.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/image_fetcher/image_decoder_impl.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -97,6 +98,9 @@ IdentityManagerFactory::~IdentityManagerFactory() {
+ // static
+ signin::IdentityManager* IdentityManagerFactory::GetForProfile(
+     Profile* profile) {
++#if BUILDFLAG(ENABLE_ALLOY_BOOTSTRAP)
++  DCHECK(!cef::IsAlloyRuntimeEnabled());
++#endif
+   return static_cast<signin::IdentityManager*>(
+       GetInstance()->GetServiceForBrowserContext(profile, true));
+ }
+diff --git net/cookies/cookie_monster.cc net/cookies/cookie_monster.cc
+index 80af544e4175c..5b1edea7a43cb 100644
+--- net/cookies/cookie_monster.cc
++++ net/cookies/cookie_monster.cc
+@@ -630,6 +630,25 @@ void CookieMonster::SetCookieableSchemes(
+   MaybeRunCookieCallback(std::move(callback), true);
+ }
+ 
++void CookieMonster::AddCookieableSchemes(
++    const std::vector<std::string>& schemes,
++    SetCookieableSchemesCallback callback) {
++  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++
++  // Calls to this method will have no effect if made after a WebView or
++  // CookieManager instance has been created.
++  if (initialized_) {
++    MaybeRunCookieCallback(std::move(callback), false);
++    return;
++  }
++
++  if (!schemes.empty()) {
++    cookieable_schemes_.insert(cookieable_schemes_.begin(), schemes.begin(),
++                               schemes.end());
++  }
++  MaybeRunCookieCallback(std::move(callback), true);
++}
++
+ // This function must be called before the CookieMonster is used.
+ void CookieMonster::SetPersistSessionCookies(bool persist_session_cookies) {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+diff --git net/cookies/cookie_monster.h net/cookies/cookie_monster.h
+index b4cb9c4c343a5..976f2134eb055 100644
+--- net/cookies/cookie_monster.h
++++ net/cookies/cookie_monster.h
+@@ -210,6 +210,8 @@ class NET_EXPORT CookieMonster : public CookieStore {
+   CookieChangeDispatcher& GetChangeDispatcher() override;
+   void SetCookieableSchemes(const std::vector<std::string>& schemes,
+                             SetCookieableSchemesCallback callback) override;
++  void AddCookieableSchemes(const std::vector<std::string>& schemes,
++                            SetCookieableSchemesCallback callback) override;
+   std::optional<bool> SiteHasCookieInOtherPartition(
+       const net::SchemefulSite& site,
+       const std::optional<CookiePartitionKey>& partition_key) const override;
+diff --git net/cookies/cookie_store.h net/cookies/cookie_store.h
+index 3f0be99e0e145..0462ebbe9bedc 100644
+--- net/cookies/cookie_store.h
++++ net/cookies/cookie_store.h
+@@ -163,6 +163,11 @@ class NET_EXPORT CookieStore {
+   // Transfer ownership of a CookieAccessDelegate.
+   void SetCookieAccessDelegate(std::unique_ptr<CookieAccessDelegate> delegate);
+ 
++  // Adds to the list of cookieable schemes. Does nothing if called after first
++  // use of the instance (i.e. after the instance initialization process).
++  virtual void AddCookieableSchemes(const std::vector<std::string>& schemes,
++                                    SetCookieableSchemesCallback callback) = 0;
++
+   // This may be null if no delegate has been set yet, or the delegate has been
+   // reset to null.
+   const CookieAccessDelegate* cookie_access_delegate() const {
+diff --git services/network/cookie_manager.cc services/network/cookie_manager.cc
+index 60cd3989fe135..d65e76f5b8b75 100644
+--- services/network/cookie_manager.cc
++++ services/network/cookie_manager.cc
+@@ -313,14 +313,9 @@ void CookieManager::AllowFileSchemeCookies(
+     AllowFileSchemeCookiesCallback callback) {
+   OnSettingsWillChange();
+ 
+-  std::vector<std::string> cookieable_schemes(
+-      net::CookieMonster::kDefaultCookieableSchemes,
+-      net::CookieMonster::kDefaultCookieableSchemes +
+-          net::CookieMonster::kDefaultCookieableSchemesCount);
+-  if (allow) {
+-    cookieable_schemes.push_back(url::kFileScheme);
+-  }
+-  cookie_store_->SetCookieableSchemes(cookieable_schemes, std::move(callback));
++  if (!allow)
++    return;
++  cookie_store_->AddCookieableSchemes({url::kFileScheme}, std::move(callback));
+ }
+ 
+ void CookieManager::SetForceKeepSessionState() {
+diff --git services/network/network_context.cc services/network/network_context.cc
+index aa94a653ee3fb..2c105860f5682 100644
+--- services/network/network_context.cc
++++ services/network/network_context.cc
+@@ -2434,16 +2434,20 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
+         network_service_->network_quality_estimator());
+   }
+ 
+-  if (session_cleanup_cookie_store) {
+-    std::unique_ptr<net::CookieMonster> cookie_store =
+-        std::make_unique<net::CookieMonster>(session_cleanup_cookie_store.get(),
+-                                             net_log);
+-    if (params_->persist_session_cookies)
+-      cookie_store->SetPersistSessionCookies(true);
++  std::unique_ptr<net::CookieMonster> cookie_store =
++      std::make_unique<net::CookieMonster>(session_cleanup_cookie_store.get(),
++                                           net_log);
++  if (session_cleanup_cookie_store && params_->persist_session_cookies)
++    cookie_store->SetPersistSessionCookies(true);
+ 
+-    builder.SetCookieStore(std::move(cookie_store));
++  if (params_->cookieable_schemes.has_value()) {
++    cookie_store->SetCookieableSchemes(
++        *params_->cookieable_schemes,
++        net::CookieStore::SetCookieableSchemesCallback());
+   }
+ 
++  builder.SetCookieStore(std::move(cookie_store));
++
+   if (base::FeatureList::IsEnabled(features::kPrivateStateTokens) ||
+       base::FeatureList::IsEnabled(features::kFledgePst)) {
+     trust_token_store_ = std::make_unique<PendingTrustTokenStore>();
+diff --git services/network/public/mojom/network_context.mojom services/network/public/mojom/network_context.mojom
+index 10109d4ac851f..23b6f7ff418b9 100644
+--- services/network/public/mojom/network_context.mojom
++++ services/network/public/mojom/network_context.mojom
+@@ -359,6 +359,9 @@ struct NetworkContextParams {
+   // cookies. Otherwise it should be false.
+   bool persist_session_cookies = false;
+ 
++  // Schemes that will be passed to CookieMonster::SetCookieableSchemes.
++  array<string>? cookieable_schemes;
++
+   // True if an HTTP cache should be used.
+   bool http_cache_enabled = true;
+   // Maximum size of the HTTP cache. 0 means to use the default size.

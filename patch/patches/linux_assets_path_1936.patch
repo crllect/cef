@@ -1,0 +1,39 @@
+diff --git content/browser/child_process_launcher_helper_linux.cc content/browser/child_process_launcher_helper_linux.cc
+index add20a2f81d66..97071092ff768 100644
+--- content/browser/child_process_launcher_helper_linux.cc
++++ content/browser/child_process_launcher_helper_linux.cc
+@@ -191,7 +191,7 @@ ZygoteCommunication* ChildProcessLauncherHelper::GetZygoteForLaunch() {
+ base::File OpenFileToShare(const base::FilePath& path,
+                            base::MemoryMappedFile::Region* region) {
+   base::FilePath exe_dir;
+-  bool result = base::PathService::Get(base::BasePathKey::DIR_EXE, &exe_dir);
++  bool result = base::PathService::Get(base::BasePathKey::DIR_ASSETS, &exe_dir);
+   DCHECK(result);
+   base::File file(exe_dir.Append(path),
+                   base::File::FLAG_OPEN | base::File::FLAG_READ);
+diff --git sandbox/linux/suid/client/setuid_sandbox_host.cc sandbox/linux/suid/client/setuid_sandbox_host.cc
+index 84fd365da0283..88f3adf813eca 100644
+--- sandbox/linux/suid/client/setuid_sandbox_host.cc
++++ sandbox/linux/suid/client/setuid_sandbox_host.cc
+@@ -120,7 +120,7 @@ bool SetuidSandboxHost::IsDisabledViaEnvironment() {
+ base::FilePath SetuidSandboxHost::GetSandboxBinaryPath() {
+   base::FilePath sandbox_binary;
+   base::FilePath exe_dir;
+-  if (base::PathService::Get(base::DIR_EXE, &exe_dir)) {
++  if (base::PathService::Get(base::DIR_ASSETS, &exe_dir)) {
+     base::FilePath sandbox_candidate = exe_dir.AppendASCII("chrome-sandbox");
+     if (base::PathExists(sandbox_candidate))
+       sandbox_binary = sandbox_candidate;
+diff --git ui/ozone/common/egl_util.cc ui/ozone/common/egl_util.cc
+index 021bcad8c3084..a37406d408718 100644
+--- ui/ozone/common/egl_util.cc
++++ ui/ozone/common/egl_util.cc
+@@ -127,7 +127,7 @@ bool LoadDefaultEGLGLES2Bindings(
+   if (implementation.gl == gl::kGLImplementationEGLANGLE) {
+     base::FilePath module_path;
+ #if !BUILDFLAG(IS_FUCHSIA)
+-    if (!base::PathService::Get(base::DIR_MODULE, &module_path))
++    if (!base::PathService::Get(base::DIR_ASSETS, &module_path))
+       return false;
+ #endif
+ 

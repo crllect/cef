@@ -1,0 +1,30 @@
+diff --git components/metrics/persistent_system_profile.cc components/metrics/persistent_system_profile.cc
+index 768c933cd13c6..78d86b97e64bf 100644
+--- components/metrics/persistent_system_profile.cc
++++ components/metrics/persistent_system_profile.cc
+@@ -395,6 +395,10 @@ bool PersistentSystemProfile::GetSystemProfile(
+   return true;
+ }
+ 
++void PersistentSystemProfile::DetachFromCurrentThread() {
++  DETACH_FROM_THREAD(thread_checker_);
++}
++
+ // static
+ void PersistentSystemProfile::MergeUpdateRecords(
+     const base::PersistentMemoryAllocator& memory_allocator,
+diff --git components/metrics/persistent_system_profile.h components/metrics/persistent_system_profile.h
+index 5ef2afa1183a6..a2e00202f7b42 100644
+--- components/metrics/persistent_system_profile.h
++++ components/metrics/persistent_system_profile.h
+@@ -64,6 +64,10 @@ class PersistentSystemProfile {
+       const base::PersistentMemoryAllocator& memory_allocator,
+       SystemProfileProto* system_profile);
+ 
++  // Detaches this object from the current thread in preparation for a move to
++  // a different thread.
++  void DetachFromCurrentThread();
++
+  private:
+   friend class PersistentSystemProfileTest;
+ 

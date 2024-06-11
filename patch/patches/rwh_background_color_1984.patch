@@ -1,0 +1,54 @@
+diff --git content/browser/renderer_host/render_widget_host_view_aura.cc content/browser/renderer_host/render_widget_host_view_aura.cc
+index df08c0e0fc675..1a2af7a635e75 100644
+--- content/browser/renderer_host/render_widget_host_view_aura.cc
++++ content/browser/renderer_host/render_widget_host_view_aura.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <limits>
+ #include <memory>
++#include <tuple>
+ #include <set>
+ #include <string_view>
+ #include <utility>
+@@ -54,6 +55,7 @@
+ #include "content/public/browser/content_browser_client.h"
+ #include "content/public/browser/device_service.h"
+ #include "content/public/browser/render_view_host.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/common/page_visibility_state.h"
+ #include "services/service_manager/public/cpp/interface_provider.h"
+ #include "third_party/blink/public/common/input/web_input_event.h"
+@@ -738,10 +740,12 @@ gfx::Rect RenderWidgetHostViewAura::GetViewBounds() {
+ void RenderWidgetHostViewAura::UpdateBackgroundColor() {
+   CHECK(GetBackgroundColor());
+ 
+-  SkColor color = *GetBackgroundColor();
+-  bool opaque = SkColorGetA(color) == SK_AlphaOPAQUE;
+-  window_->layer()->SetFillsBoundsOpaquely(opaque);
+-  window_->layer()->SetColor(color);
++  if (window_) {
++    SkColor color = *GetBackgroundColor();
++    bool opaque = SkColorGetA(color) == SK_AlphaOPAQUE;
++    window_->layer()->SetFillsBoundsOpaquely(opaque);
++    window_->layer()->SetColor(color);
++  }
+ }
+ 
+ #if BUILDFLAG(IS_WIN)
+@@ -2371,6 +2375,16 @@ void RenderWidgetHostViewAura::CreateAuraWindow(aura::client::WindowType type) {
+   window_->layer()->SetColor(GetBackgroundColor() ? *GetBackgroundColor()
+                                                   : SK_ColorWHITE);
+   UpdateFrameSinkIdRegistration();
++
++  // Do this after |window_| is created to avoid crashes on Win10.
++  // See https://crbug.com/761389.
++  auto* web_contents =
++      WebContents::FromRenderViewHost(RenderViewHost::From(host()));
++  if (web_contents) {
++    // TODO(mostynb): actually use prefs.  Landing this as a separate CL
++    // first to rebaseline some unreliable layout tests.
++    std::ignore = web_contents->GetOrCreateWebPreferences();
++  }
+ }
+ 
+ void RenderWidgetHostViewAura::UpdateFrameSinkIdRegistration() {

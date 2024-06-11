@@ -1,0 +1,33 @@
+diff --git content/browser/storage_partition_impl.cc content/browser/storage_partition_impl.cc
+index 56f70fef0b2fb..4d2a75eebd102 100644
+--- content/browser/storage_partition_impl.cc
++++ content/browser/storage_partition_impl.cc
+@@ -3326,8 +3326,12 @@ void StoragePartitionImpl::GetQuotaSettings(
+     return;
+   }
+ 
++  // CEF always returns false for IsOffTheRecord(), so also check the path.
++  const bool is_incognito = browser_context_->IsOffTheRecord() ||
++                            browser_context_->GetPath().empty();
++
+   storage::GetNominalDynamicSettings(
+-      GetPath(), browser_context_->IsOffTheRecord(),
++      GetPath(), is_incognito,
+       storage::GetDefaultDeviceInfoHelper(), std::move(callback));
+ }
+ 
+@@ -3337,9 +3341,12 @@ void StoragePartitionImpl::InitNetworkContext() {
+   cert_verifier::mojom::CertVerifierCreationParamsPtr
+       cert_verifier_creation_params =
+           cert_verifier::mojom::CertVerifierCreationParams::New();
+-  GetContentClient()->browser()->ConfigureNetworkContextParams(
++  if (!GetContentClient()->browser()->ConfigureNetworkContextParams(
+       browser_context_, is_in_memory(), relative_partition_path_,
+-      context_params.get(), cert_verifier_creation_params.get());
++      context_params.get(), cert_verifier_creation_params.get())) {
++    // Don't re-initialize the network context during shutdown.
++    return;
++  }
+   // Should be initialized with existing per-profile CORS access lists.
+   DCHECK(context_params->cors_origin_access_list.empty())
+       << "NetworkContextParams::cors_origin_access_list should be populated "
